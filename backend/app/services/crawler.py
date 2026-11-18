@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.host_index import host_index_service
 from app.store import store
 
 MODULE = "crawler"
@@ -48,6 +49,8 @@ class CrawlerService:
         entry["pending"] = True
         entry["abnormal"] = False
         rows.append(entry)
+        # 同一个动作同时更新采集规则服务与监控面板服务：两边读同一份主机规则索引快照。
+        host_index_service.rebuild(trigger="采集规则服务")
         return entry, []
 
     def run_action(self, entry_id: int, action: str) -> tuple[dict[str, Any] | None, str]:
@@ -62,4 +65,6 @@ class CrawlerService:
         entry["status"] = target
         entry["pending"] = target != STATUS_ORDER[-1]
         entry["abnormal"] = action in NEGATIVE_ACTIONS
+        # 规则状态变化会改变主机索引输入，立即重算，监控面板同步看到新批次。
+        host_index_service.rebuild(trigger="采集规则服务")
         return entry, f"采集规则已{action}"

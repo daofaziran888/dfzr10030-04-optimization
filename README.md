@@ -74,5 +74,33 @@ npm run dev
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
 
+## 主机规则索引及冲突清单
+
+网页采集规则不再逐条比较目标网址与字符编码，而是由 `app/services/host_index.py`
+按目标主机归并采集规则、结合最近抓取样本识别编码冲突，生成持久化快照：
+
+- 同一主机只占一个索引项，保留规则编号与当前编码；同一主机出现多个编码时进入
+  冲突清单，保留全部冲突编码、涉及规则与样本证据，乱码排查可回溯到具体规则和
+  最近抓取样本。
+- 快照以批次版本为准重算，历史批次保留可按批次回查；重建按请求键（缺省为内容
+  指纹）幂等，相同输入再提交不多写，并发重建只落一个批次。
+- 采集规则服务与监控面板服务读写同一份快照：规则登记/状态动作会触发重算，
+  监控面板通过自己的链路读到同一批次，并把失败抓取按主机+编码归入趋势清单、
+  把编码冲突落到待复核台账。
+
+主要接口：
+
+| 链路 | 接口 | 说明 |
+| --- | --- | --- |
+| 采集规则 | `GET /api/crawler/host-index` | 按主机/规则编号/编码检索，可只看冲突、按批次回查 |
+| 采集规则 | `GET /api/crawler/host-index/detail?host=` | 展开主机索引项：规则编号、编码、最近抓取样本 |
+| 采集规则 | `GET /api/crawler/host-index/conflicts` | 编码冲突清单 |
+| 采集规则 | `GET /api/crawler/host-index/batches` | 批次历史 |
+| 采集规则 | `POST /api/crawler/host-index/rebuild` | 重算索引（幂等） |
+| 监控面板 | `GET /api/monitor/host-index` | 同一份主机规则索引快照 |
+| 监控面板 | `GET /api/monitor/host-trends` | 失败抓取趋势清单（按主机+编码） |
+| 监控面板 | `GET /api/monitor/review-ledger` | 待复核台账 |
+| 监控面板 | `POST /api/monitor/review-ledger/{id}/actions` | 标记已复核 / 重新打开 |
+
 领域：数据工程
 子方向：数据采集、爬虫与RPA

@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 
 from app.schemas import ActionPayload, ActionResult, EntryPayload, PageResult
 from app.services.crawler import CrawlerService
+from app.services.host_index import host_index_service
 
 router = APIRouter(prefix="/api/crawler", tags=["网页采集规则"])
 
@@ -39,6 +40,66 @@ def list_entries(
     items, total = service.list_entries(
         filters=query_filters(request), keyword=keyword, status=status, page=page, size=size)
     return PageResult(items=items, total=total, page=page, size=size)
+
+
+@router.get("/host-index")
+def list_host_index(
+    host: str | None = Query(default=None, description="按目标主机检索"),
+    rule: str | None = Query(default=None, description="按规则编号检索"),
+    encoding: str | None = Query(default=None, description="按字符编码筛选"),
+    conflict_only: bool = Query(default=False, description="只看编码冲突的主机"),
+    batch: str | None = Query(default=None, description="批次号，缺省取当前批次"),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=50, ge=1, le=200),
+) -> dict:
+    """主机规则索引：同一主机只占一个索引项，保留规则编号与当前编码。"""
+    items, total, batch_info = host_index_service.list_entries(
+        host=host, rule=rule, encoding=encoding, conflict_only=conflict_only,
+        batch_no=batch, page=page, size=size)
+    return {"items": items, "total": total, "page": page, "size": size, "批次": batch_info}
+
+
+@router.get("/host-index/conflicts")
+def list_host_conflicts(
+    batch: str | None = Query(default=None, description="批次号，缺省取当前批次"),
+    host: str | None = Query(default=None, description="按目标主机检索"),
+) -> dict:
+    """编码冲突清单：同一主机出现多个编码时保留全部编码、涉及规则与样本证据。"""
+    items, batch_info = host_index_service.list_conflicts(batch_no=batch, host=host)
+    return {"items": items, "批次": batch_info}
+
+
+@router.get("/host-index/batches")
+def list_host_index_batches() -> dict:
+    """批次历史：以批次版本为准重算，历史批次保留，可按批次回查。"""
+    return {"items": host_index_service.list_batches()}
+
+
+@router.get("/host-index/detail")
+def host_index_detail(
+    host: str = Query(..., description="目标主机"),
+    batch: str | None = Query(default=None, description="批次号，缺省取当前批次"),
+) -> dict:
+    """展开单个主机索引项：规则编号、字符编码与最近抓取样本。"""
+    entry, batch_info = host_index_service.get_host_detail(host, batch_no=batch)
+    if entry is None:
+        batch_no = batch_info["批次号"] if batch_info else "-"
+        raise HTTPException(status_code=404, detail=f"主机 {host} 在批次 {batch_no} 中没有索引项")
+    return {"item": entry, "批次": batch_info}
+
+
+@router.post("/host-index/rebuild", response_model=ActionResult)
+def rebuild_host_index(payload: dict[str, object] | None = None) -> ActionResult:
+    """重算主机规则索引及冲突清单；相同输入（或同一请求键）再提交不多写。"""
+    key = ""
+    if payload:
+        key = str(payload.get("请求键") or "").strip()
+    batch, created = host_index_service.rebuild(trigger="采集规则服务", request_key=key or None)
+    if created:
+        message = f"主机规则索引已重算，当前批次 {batch['批次号']}（主机 {batch['主机数']} 个，冲突 {batch['冲突数']} 条）"
+    else:
+        message = f"相同输入的批次 {batch['批次号']} 已存在，本次未重复写入"
+    return ActionResult(ok=True, message=message, entry=batch)
 
 
 @router.get("/export")

@@ -45,6 +45,50 @@ def run_analysis(payload: EntryPayload) -> dict[str, Any]:
     return {"items": results}
 
 
+@router.get("/host-index")
+def monitor_host_index(
+    host: str | None = Query(default=None, description="按目标主机检索"),
+    batch: str | None = Query(default=None, description="批次号，缺省取当前批次"),
+) -> dict[str, Any]:
+    """主机规则索引：监控面板通过自己的链路读取与采集规则服务同一份快照。"""
+    return service.host_index_snapshot(host=host, batch_no=batch)
+
+
+@router.get("/host-index/conflicts")
+def monitor_host_conflicts(
+    batch: str | None = Query(default=None, description="批次号，缺省取当前批次"),
+) -> dict[str, Any]:
+    """编码冲突清单：与采集规则服务读到的批次一致。"""
+    return service.host_conflicts(batch_no=batch)
+
+
+@router.get("/host-trends")
+def monitor_host_trends(
+    host: str | None = Query(default=None, description="按目标主机检索"),
+    batch: str | None = Query(default=None, description="批次号，缺省取当前批次"),
+) -> dict[str, Any]:
+    """失败抓取趋势清单：按主机和编码归并失败与乱码。"""
+    return service.host_trends(host=host, batch_no=batch)
+
+
+@router.get("/review-ledger")
+def monitor_review_ledger(
+    status: str | None = Query(default=None, description="待复核、已复核"),
+    batch: str | None = Query(default=None, description="按批次号回查"),
+) -> dict[str, Any]:
+    """待复核台账：编码冲突随批次落账，网页采集规则侧可按批次回查。"""
+    return {"items": service.review_ledger(status=status, batch_no=batch)}
+
+
+@router.post("/review-ledger/{entry_id}/actions", response_model=ActionResult)
+def review_ledger_action(entry_id: int, payload: ActionPayload) -> ActionResult:
+    """对待复核台账执行标记已复核、重新打开；状态同步回冲突清单。"""
+    entry, message = service.review_ledger_action(entry_id, payload.action.strip())
+    if entry is None:
+        return ActionResult(ok=False, message=message)
+    return ActionResult(ok=True, message=message, entry=entry)
+
+
 @router.get("/export")
 def export_entries() -> StreamingResponse:
     items = service.list_results()
